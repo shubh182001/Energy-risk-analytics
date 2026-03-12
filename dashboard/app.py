@@ -36,7 +36,7 @@ credit_df = run_credit_assessment(cp_df)
 
 prices = prices_df.set_index("date")["price_mwh"]
 
-# Pre-compute risk metrics
+# Pre-compute risk metrics (used by Risk tab — not date-filtered)
 vol_30   = rolling_volatility(prices, 30)
 var_hist = historical_var(prices, 0.95, 252)
 var_par  = parametric_var(prices, 0.95, 30)
@@ -85,7 +85,7 @@ def kpi(label, value, unit="", color=None):
     ])
 
 # ── App Layout ────────────────────────────────────────────────────────────────
-app = dash.Dash(__name__, title="Energy Risk Analytics | SCL")
+app = dash.Dash(__name__, title="Energy Risk Analytics | SCL", suppress_callback_exceptions=True)
 
 app.layout = html.Div(style={
     "background": C["bg"], "minHeight": "100vh",
@@ -153,6 +153,26 @@ def render_tab(tab):
         return credit_layout()
 
 
+# ── Date Filter Callback — updates Market Overview charts only ────────────────
+@app.callback(
+    Output("price-chart", "figure"),
+    Output("volume-chart", "figure"),
+    Output("season-chart", "figure"),
+    Input("date-range", "start_date"),
+    Input("date-range", "end_date"),
+    prevent_initial_call=True,
+)
+def update_market_charts(start_date, end_date):
+    filtered = prices_df[
+        (prices_df["date"] >= start_date) &
+        (prices_df["date"] <= end_date)
+    ]
+    p = filtered.set_index("date")["price_mwh"]
+    rs = rolling_stats(p, 30)
+    sp = price_spike_detector(p)
+    return make_price_chart(p, rs, sp), make_volume_chart(filtered), make_season_chart(filtered)
+
+
 def market_layout():
     return html.Div([
         # KPI Row
@@ -209,8 +229,6 @@ def risk_layout():
 
 
 def credit_layout():
-    rating_colors = {"A": C["green"], "BBB": C["accent"], "BB": C["yellow"], "B": C["red"]}
-
     return html.Div([
         html.Div([
             card(kpi("Counterparties Assessed", len(credit_df))),
@@ -289,51 +307,51 @@ def dark_layout(fig):
     return fig
 
 
-def make_price_chart():
+def make_price_chart(p=None, rs=None, sp=None):
+    if p is None:
+        p = prices
+    if rs is None:
+        rs = rstats
+    if sp is None:
+        sp = spikes
+    spike_idx = p.index[sp]
     fig = go.Figure()
-    spike_idx = prices.index[spikes]
-
-    # Bollinger bands
-    fig.add_trace(go.Scatter(x=rstats.index, y=rstats["rolling_upper_band"],
+    fig.add_trace(go.Scatter(x=rs.index, y=rs["rolling_upper_band"],
                              fill=None, line=dict(width=0), showlegend=False, name="Upper Band"))
-    fig.add_trace(go.Scatter(x=rstats.index, y=rstats["rolling_lower_band"],
+    fig.add_trace(go.Scatter(x=rs.index, y=rs["rolling_lower_band"],
                              fill="tonexty", fillcolor="rgba(79,142,247,0.08)",
                              line=dict(width=0), name="Bollinger Band (±2σ)"))
-
-    # Price line
-    fig.add_trace(go.Scatter(x=prices.index, y=prices.values,
+    fig.add_trace(go.Scatter(x=p.index, y=p.values,
                              line=dict(color=C["accent"], width=1.5),
                              name="Electricity Price ($/MWh)"))
-
-    # Rolling mean
-    fig.add_trace(go.Scatter(x=rstats.index, y=rstats["rolling_mean"],
+    fig.add_trace(go.Scatter(x=rs.index, y=rs["rolling_mean"],
                              line=dict(color=C["yellow"], width=2, dash="dash"),
                              name="30-day Rolling Mean"))
-
-    # Spike markers
-    fig.add_trace(go.Scatter(x=spike_idx, y=prices[spike_idx],
+    fig.add_trace(go.Scatter(x=spike_idx, y=p[spike_idx],
                              mode="markers", marker=dict(color=C["red"], size=7, symbol="triangle-up"),
                              name="Price Spike"))
-
     fig.update_yaxes(title_text="$/MWh")
     return dark_layout(fig)
 
 
-def make_volume_chart():
+def make_volume_chart(df=None):
+    if df is None:
+        df = prices_df
     fig = go.Figure(go.Bar(
-        x=prices_df["date"], y=prices_df["volume_mwh"],
+        x=df["date"], y=df["volume_mwh"],
         marker_color=C["accent"], opacity=0.7, name="Volume (MWh)"
     ))
     fig.update_yaxes(title_text="MWh")
     return dark_layout(fig)
 
 
-def make_season_chart():
-    season_stats = prices_df.groupby("season")["price_mwh"].agg(["mean", "std"]).reset_index()
+def make_season_chart(df=None):
+    if df is None:
+        df = prices_df
+    season_stats = df.groupby("season")["price_mwh"].agg(["mean", "std"]).reset_index()
     season_order = ["Winter", "Spring", "Summer", "Fall"]
     season_stats["season"] = pd.Categorical(season_stats["season"], categories=season_order, ordered=True)
     season_stats = season_stats.sort_values("season")
-
     colors_map = {"Winter": C["accent"], "Spring": C["green"], "Summer": C["red"], "Fall": C["yellow"]}
     fig = go.Figure(go.Bar(
         x=season_stats["season"],
@@ -349,29 +367,23 @@ def make_season_chart():
 def make_var_chart():
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True,
                         row_heights=[0.6, 0.4], vertical_spacing=0.08)
-
     fig.add_trace(go.Scatter(x=prices.index, y=prices.values,
                              line=dict(color=C["accent"], width=1.2),
                              name="Price"), row=1, col=1)
-
     fig.add_trace(go.Scatter(x=vol_30.index, y=(vol_30 * 100).values,
                              line=dict(color=C["yellow"], width=1.5),
                              name="30-day Vol (%)"), row=2, col=1)
-
     fig.add_trace(go.Scatter(x=var_hist.index, y=(var_hist.abs() * 100).values,
                              line=dict(color=C["red"], width=1.5, dash="dash"),
                              name="Hist VaR 95%"), row=2, col=1)
-
     fig.add_trace(go.Scatter(x=cvar.index, y=(cvar.abs() * 100).values,
                              line=dict(color=C["purple"], width=1.5, dash="dot"),
                              name="CVaR 95%"), row=2, col=1)
-
     fig.update_yaxes(title_text="$/MWh", row=1, col=1,
                      gridcolor=C["border"], zerolinecolor=C["border"])
     fig.update_yaxes(title_text="% Daily Loss", row=2, col=1,
                      gridcolor=C["border"], zerolinecolor=C["border"])
     fig.update_xaxes(gridcolor=C["border"])
-
     fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
                       font=dict(family=FONT, color=C["text"]),
                       legend=dict(bgcolor="rgba(0,0,0,0)"),
@@ -382,7 +394,6 @@ def make_var_chart():
 def make_return_dist():
     returns = np.log(prices / prices.shift(1)).dropna() * 100
     var_line = float(np.percentile(returns, 5))
-
     fig = go.Figure()
     fig.add_trace(go.Histogram(x=returns, nbinsx=60, name="Daily Returns",
                                marker_color=C["accent"], opacity=0.7))
