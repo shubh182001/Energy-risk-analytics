@@ -1,4 +1,4 @@
-# ⚡ Energy Risk Analytics & Reporting Dashboard
+^^^^^^^^^^W# ⚡ Energy Risk Analytics & Reporting Dashboard
 
 An interactive risk analytics platform for wholesale electricity trading, built to demonstrate core competencies aligned with energy trading mid-office functions — including market risk monitoring, price analytics, and counterparty credit assessment.
 
@@ -149,16 +149,6 @@ def fetch_eia_prices(api_key, start="2022-01-01", end="2024-12-31"):
 | scikit-learn | Data preprocessing for credit model |
 | Plotly Dash | Interactive dashboard |
 | EIA API (optional) | Real wholesale electricity price data |
-
----
-
-## 💡 Key Takeaways for Interview
-
-1. **Market Risk:** Price volatility in PNW electricity markets is seasonal and spike-prone — risk teams need rolling VaR + CVaR to set position limits and capital reserves.
-
-2. **Credit Risk:** Annual counterparty review involves scoring financial ratios against internal benchmarks — this model automates that process with a transparent, auditable scoring framework.
-
-3. **ETRM Alignment:** A platform like this could integrate with an Energy Trading & Risk Management (ETRM) system (e.g., OPIS, Triple Point) to pull live trade data and generate automated daily risk reports — reducing manual work for risk analysts.
 
 ---
 
